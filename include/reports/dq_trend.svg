@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420" role="img" aria-label="Daily data quality failure rate by pipeline">
+<rect width="100%" height="100%" fill="white"/>
+<text x="76" y="32" font-family="Arial" font-size="20" font-weight="bold">Data-quality failure trend</text>
+<text x="76" y="51" font-family="Arial" font-size="12" fill="#475569">Failed rows as a percentage of checked rows, last 30 days</text>
+<line x1="76" y1="350.0" x2="864" y2="350.0" stroke="#e2e8f0"/>
+<text x="66" y="354.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">0%</text>
+<line x1="76" y1="292.0" x2="864" y2="292.0" stroke="#e2e8f0"/>
+<text x="66" y="296.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">2%</text>
+<line x1="76" y1="234.0" x2="864" y2="234.0" stroke="#e2e8f0"/>
+<text x="66" y="238.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">4%</text>
+<line x1="76" y1="176.0" x2="864" y2="176.0" stroke="#e2e8f0"/>
+<text x="66" y="180.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">6%</text>
+<line x1="76" y1="118.0" x2="864" y2="118.0" stroke="#e2e8f0"/>
+<text x="66" y="122.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">8%</text>
+<line x1="76" y1="60.0" x2="864" y2="60.0" stroke="#e2e8f0"/>
+<text x="66" y="64.0" text-anchor="end" font-family="Arial" font-size="11" fill="#475569">10%</text>
+<text x="76.0" y="384" text-anchor="middle" font-family="Arial" font-size="10" fill="#475569">2026-10-20</text>
+<text x="470.0" y="384" text-anchor="middle" font-family="Arial" font-size="10" fill="#475569">2026-10-21</text>
+<text x="864.0" y="384" text-anchor="middle" font-family="Arial" font-size="10" fill="#475569">2026-10-22</text>
+<polyline points="76.0,328.3 470.0,328.3 864.0,288.3" fill="none" stroke="#2563eb" stroke-width="3"/>
+<circle cx="76.0" cy="328.3" r="4" fill="#2563eb"/>
+<circle cx="470.0" cy="328.3" r="4" fill="#2563eb"/>
+<circle cx="864.0" cy="288.3" r="4" fill="#2563eb"/>
+<polyline points="864.0,196.3" fill="none" stroke="#dc2626" stroke-width="3"/>
+<circle cx="864.0" cy="196.3" r="4" fill="#dc2626"/>
+<line x1="76" y1="408" x2="98" y2="408" stroke="#2563eb" stroke-width="3"/>
+<text x="104" y="412" font-family="Arial" font-size="12">nammamart_etl_prasad</text>
+<line x1="321" y1="408" x2="343" y2="408" stroke="#dc2626" stroke-width="3"/>
+<text x="349" y="412" font-family="Arial" font-size="12">nammamart_elt_prasad</text>
+</svg>

@@ -28,7 +28,9 @@ from nammamart_pipeline_utils import (
     normalize_order_status,
     normalize_payment_mode,
     record_pipeline_failure,
+    update_customer_loyalty_history,
     validate_file,
+    write_dq_trend_chart,
     write_quarantine_csv,
 )
 
@@ -315,6 +317,7 @@ def nammamart_etl_prasad():
         product_dim = products[["product_id", "product_name", "category", "brand", "cost_price"]].copy()
         store_dim = stores[["store_id", "store_name", "zone", "capacity_orders_per_day"]].copy()
 
+        update_customer_loyalty_history(con, customer_dim)
         con.execute("DELETE FROM etl_dim_customer")
         con.execute("DELETE FROM etl_dim_product")
         con.execute("DELETE FROM etl_dim_store")
@@ -411,13 +414,46 @@ def nammamart_etl_prasad():
         con = connection()
         con.execute("CREATE OR REPLACE TABLE etl_daily_zone_revenue AS SELECT zone, store_id, CAST(order_date AS DATE) AS order_date, SUM(net_revenue) AS revenue FROM etl_fact_orders WHERE order_status='DELIVERED' GROUP BY zone, store_id, CAST(order_date AS DATE)")
         con.execute("CREATE OR REPLACE TABLE etl_category_margin AS SELECT category, SUM(gross_margin) AS gross_margin, SUM(net_revenue) AS revenue FROM etl_fact_orders WHERE order_status='DELIVERED' GROUP BY category")
+        con.execute(
+            """
+            CREATE OR REPLACE TABLE etl_store_capacity_check AS
+            SELECT
+                f.store_id,
+                f.zone,
+                f.order_date,
+                COUNT(*) AS daily_orders,
+                MAX(s.capacity_orders_per_day) AS capacity_orders_per_day,
+                COUNT(*) > MAX(s.capacity_orders_per_day) AS over_capacity
+            FROM etl_fact_orders f
+            JOIN etl_dim_store s USING (store_id)
+            GROUP BY f.store_id, f.zone, f.order_date
+            """
+        )
         zone_df = con.execute("SELECT * FROM etl_daily_zone_revenue ORDER BY order_date, zone").fetchdf()
         category_df = con.execute("SELECT * FROM etl_category_margin ORDER BY gross_margin DESC").fetchdf()
+        capacity_rows = con.execute(
+            "SELECT COUNT(*) FROM etl_store_capacity_check"
+        ).fetchone()[0]
+        capacity_failures = con.execute(
+            "SELECT COUNT(*) FROM etl_store_capacity_check WHERE over_capacity"
+        ).fetchone()[0]
         ensure_dq_table(con)
         dq_rows = [row for result in validation_results for row in result["dq_rows"]]
         dq_rows.extend(reconciliation_result["dq_rows"])
+        dq_rows.append({
+            "run_id": validation_results[0]["run_id"],
+            "dag_id": "nammamart_etl_prasad",
+            "check_name": "daily_orders_within_store_capacity",
+            "dimension": "Accuracy",
+            "severity": "Warning",
+            "rows_checked": capacity_rows,
+            "rows_failed": capacity_failures,
+            "status": "warn" if capacity_failures else "pass",
+            "checked_at": pendulum.now("Asia/Kolkata").to_iso8601_string(),
+        })
         append_dq_results(con, dq_rows)
         _write_run_audit(con, validation_results[0]["run_id"], validation_results, "nammamart_etl_prasad")
+        write_dq_trend_chart(con)
         con.execute("CREATE OR REPLACE TABLE etl_daily_store_kpis AS SELECT store_id, zone, order_date, SUM(revenue) AS net_revenue FROM etl_daily_zone_revenue GROUP BY store_id, zone, order_date")
         con.execute("CREATE OR REPLACE TABLE etl_delivery_sla AS SELECT store_id, AVG(delivery_minutes) AS avg_delivery_minutes, 100.0 * AVG(CASE WHEN within_15_min THEN 1.0 ELSE 0.0 END) AS pct_within_15_min FROM etl_fact_orders WHERE order_status='DELIVERED' GROUP BY store_id")
         con.execute("CREATE OR REPLACE TABLE etl_payment_mode_revenue AS SELECT payment_mode, SUM(net_revenue) AS revenue FROM etl_fact_orders WHERE order_status='DELIVERED' GROUP BY payment_mode")

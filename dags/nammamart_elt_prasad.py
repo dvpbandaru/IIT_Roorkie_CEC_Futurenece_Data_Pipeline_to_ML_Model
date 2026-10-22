@@ -13,7 +13,12 @@ import duckdb
 import pendulum
 from airflow.decorators import dag, task
 
-from nammamart_pipeline_utils import DATA_DIR, WAREHOUSE_DB, record_pipeline_failure
+from nammamart_pipeline_utils import (
+    DATA_DIR,
+    WAREHOUSE_DB,
+    record_pipeline_failure,
+    write_dq_trend_chart,
+)
 
 SQL_DIR = ROOT / "include" / "sql" / "elt"
 SOURCES = {
@@ -140,6 +145,7 @@ def nammamart_elt_prasad():
             "stg_stores.sql",
             "stg_orders.sql",
             "stg_payments.sql",
+            "dim_customer_loyalty_scd2.sql",
         ]:
             execute_sql(sql_name)
         return raw_run_id
@@ -173,9 +179,12 @@ def nammamart_elt_prasad():
             "mart_top_customers.sql",
             "mart_payment_mode_revenue.sql",
             "mart_rejected_by_reason.sql",
+            "mart_store_capacity.sql",
             "record_dq_and_audit.sql",
         ]:
             execute_sql(sql_name)
+        with duckdb.connect(str(WAREHOUSE_DB)) as con:
+            write_dq_trend_chart(con)
         with duckdb.connect(str(WAREHOUSE_DB), read_only=True) as con:
             print("Daily store KPIs")
             print(con.execute("SELECT * FROM mart_daily_store_kpis ORDER BY order_date, zone, store_id").fetchdf().to_string(index=False))

@@ -216,6 +216,13 @@ ELT's reason-based quarantine total includes duplicate source rows after weighti
 
 The DAGs parse without import errors. I ran experiments 7 and 8 through the local ETL validator on disposable copies, but have not verified either through Airflow or ELT. Freshness has an explicit DQ check, and the MRP comparison provides a basic distribution warning. Exact mart-to-source lineage is still incomplete, and schema failures rely on expected-column access. The Airflow experiments, including successful runs and recovery, still need to be completed.
 
+### Bonus features
+
+- Both pipelines keep loyalty-tier history in SCD Type 2 tables. Existing tiers are recorded when this code first runs; earlier tier changes cannot be recovered from the current customer snapshot.
+- Both pipelines compare daily store order counts with `capacity_orders_per_day` and record over-capacity days as warning-level checks in `dq_results`.
+- After writing DQ results, the pipelines generate [`include/reports/dq_trend.svg`](./include/reports/dq_trend.svg) from the last 30 days of `dq_results`. The committed chart uses the available local DQ history; a successful Airflow run is still needed to add Airflow-run evidence.
+- Failure callbacks can send a Slack alert using the Airflow Variable `nammamart_slack_webhook`. Configure it in Airflow or a secrets backend; no webhook is stored in the repository. Alerts are not active until that Variable is set. The callback still writes the failure to `pipeline_runs` when the Variable is absent.
+
 ### Screenshot evidence
 
 The screenshots are in [`screenshots/`](./screenshots/). They show what I actually observed:

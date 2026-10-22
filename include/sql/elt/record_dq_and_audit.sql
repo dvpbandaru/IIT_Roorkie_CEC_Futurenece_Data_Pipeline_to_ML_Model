@@ -145,6 +145,11 @@ WITH run_info AS (
         (SELECT COUNT(*) FROM stg_orders),
         CASE WHEN (SELECT MAX(order_ts) FROM stg_orders)
             < current_timestamp - INTERVAL '1 day' THEN 1 ELSE 0 END
+    UNION ALL
+    SELECT (SELECT run_id FROM run_info), 'nammamart_elt_prasad',
+        'daily_orders_within_store_capacity', 'Accuracy', 'Warning',
+        (SELECT COUNT(*) FROM mart_store_capacity),
+        (SELECT COUNT(*) FROM mart_store_capacity WHERE over_capacity)
 ), inserted_checks AS (
     SELECT run_id, dag_id, check_name, dimension, severity, rows_checked,
         rows_failed,

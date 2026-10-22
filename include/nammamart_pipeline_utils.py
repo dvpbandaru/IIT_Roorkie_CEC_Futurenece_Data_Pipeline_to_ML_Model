@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 import duckdb
 import pandas as pd
@@ -13,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "include" / "data" / "nammamart"
 WAREHOUSE_DB = ROOT / "include" / "warehouse_prasad.duckdb"
 QUARANTINE_DIR = ROOT / "include" / "quarantine" / "prasad"
+REPORT_DIR = ROOT / "include" / "reports"
 
 ALLOWED_ORDER_STATUS = {"DELIVERED", "CANCELLED", "RETURNED"}
 ALLOWED_PAYMENT_MODES = {"UPI", "Card", "Cash on Delivery", "Wallet"}
@@ -174,6 +177,199 @@ def record_pipeline_failure(context: dict) -> None:
             """,
             [run_id, dag_id, failed_task, reason],
         )
+    from airflow.models import Variable
+
+    webhook_url = Variable.get("nammamart_slack_webhook", default_var="")
+    if not webhook_url:
+        logging.getLogger(__name__).warning(
+            "Slack failure alert not sent: Airflow Variable "
+            "'nammamart_slack_webhook' is not configured"
+        )
+        return
+
+    from slack_sdk.webhook import WebhookClient
+
+    response = WebhookClient(webhook_url, timeout=10).send(
+        text=(
+            f"NammaMart DAG failed: {dag_id}\n"
+            f"Task: {failed_task}\n"
+            f"Run: {run_id}\n"
+            f"Error type: {type(exception).__name__ if exception else 'TaskFailure'}"
+        )
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Slack failure alert returned HTTP {response.status_code}"
+        )
+
+
+def update_customer_loyalty_history(
+    connection: duckdb.DuckDBPyConnection, customers: pd.DataFrame
+) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS etl_dim_customer_loyalty_scd2 (
+            customer_id VARCHAR,
+            loyalty_tier VARCHAR,
+            valid_from TIMESTAMP,
+            valid_to TIMESTAMP,
+            is_current BOOLEAN
+        )
+        """
+    )
+    snapshot = (
+        customers[["customer_id", "loyalty_tier"]]
+        .dropna(subset=["customer_id", "loyalty_tier"])
+        .drop_duplicates(subset=["customer_id"], keep="last")
+        .copy()
+    )
+    snapshot["customer_id"] = snapshot["customer_id"].astype(str).str.strip()
+    snapshot["loyalty_tier"] = snapshot["loyalty_tier"].astype(str).str.strip()
+    snapshot = snapshot.loc[
+        snapshot["customer_id"].ne("") & snapshot["loyalty_tier"].ne("")
+    ]
+    connection.register("customer_loyalty_snapshot", snapshot)
+    changed_at = pd.Timestamp.now(tz="Asia/Kolkata").tz_localize(None).to_pydatetime()
+    connection.execute(
+        """
+        UPDATE etl_dim_customer_loyalty_scd2 AS history
+        SET valid_to = ?, is_current = FALSE
+        FROM customer_loyalty_snapshot AS snapshot
+        WHERE history.customer_id = snapshot.customer_id
+          AND history.is_current
+          AND history.loyalty_tier IS DISTINCT FROM snapshot.loyalty_tier
+        """,
+        [changed_at],
+    )
+    connection.execute(
+        """
+        INSERT INTO etl_dim_customer_loyalty_scd2
+            (customer_id, loyalty_tier, valid_from, valid_to, is_current)
+        SELECT snapshot.customer_id, snapshot.loyalty_tier, ?, NULL, TRUE
+        FROM customer_loyalty_snapshot AS snapshot
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM etl_dim_customer_loyalty_scd2 AS history
+            WHERE history.customer_id = snapshot.customer_id
+              AND history.is_current
+              AND history.loyalty_tier = snapshot.loyalty_tier
+        )
+        """,
+        [changed_at],
+    )
+    connection.unregister("customer_loyalty_snapshot")
+
+
+def write_dq_trend_chart(
+    connection: duckdb.DuckDBPyConnection, output_path: Path | None = None
+) -> Path:
+    trend_rows = connection.execute(
+        """
+        SELECT CAST(checked_at AS DATE) AS check_date, dag_id,
+               SUM(rows_failed) AS rows_failed,
+               SUM(rows_checked) AS rows_checked
+        FROM dq_results
+        WHERE dag_id IN ('nammamart_etl_prasad', 'nammamart_elt_prasad')
+          AND checked_at >= current_date - INTERVAL '29 days'
+        GROUP BY check_date, dag_id
+        ORDER BY check_date, dag_id
+        """
+    ).fetchall()
+    dates = sorted({row[0] for row in trend_rows})
+    width, height = 900, 420
+    margin = {"left": 76, "right": 36, "top": 60, "bottom": 70}
+    chart_width = width - margin["left"] - margin["right"]
+    chart_height = height - margin["top"] - margin["bottom"]
+    rates = {
+        (row[0], row[1]): (
+            100.0 * row[2] / row[3] if row[3] else 0.0
+        )
+        for row in trend_rows
+    }
+    max_rate = max(rates.values(), default=100.0)
+    y_max = max(10, int((max_rate + 9) // 10) * 10)
+    colors = {
+        "nammamart_etl_prasad": "#2563eb",
+        "nammamart_elt_prasad": "#dc2626",
+    }
+
+    def x_position(index: int) -> float:
+        if len(dates) < 2:
+            return margin["left"] + chart_width / 2
+        return margin["left"] + chart_width * index / (len(dates) - 1)
+
+    def y_position(rate: float) -> float:
+        return margin["top"] + chart_height * (1 - rate / y_max)
+
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Daily data quality failure rate by pipeline">',
+        '<rect width="100%" height="100%" fill="white"/>',
+        '<text x="76" y="32" font-family="Arial" font-size="20" '
+        'font-weight="bold">Data-quality failure trend</text>',
+        '<text x="76" y="51" font-family="Arial" font-size="12" fill="#475569">'
+        'Failed rows as a percentage of checked rows, last 30 days</text>',
+    ]
+    for tick in range(0, y_max + 1, max(1, y_max // 5)):
+        y = y_position(float(tick))
+        svg.append(
+            f'<line x1="{margin["left"]}" y1="{y:.1f}" '
+            f'x2="{width - margin["right"]}" y2="{y:.1f}" stroke="#e2e8f0"/>'
+        )
+        svg.append(
+            f'<text x="{margin["left"] - 10}" y="{y + 4:.1f}" text-anchor="end" '
+            'font-family="Arial" font-size="11" fill="#475569">'
+            f'{tick}%</text>'
+        )
+    for index, check_date in enumerate(dates):
+        if len(dates) <= 8 or index in {0, len(dates) - 1}:
+            x = x_position(index)
+            svg.append(
+                f'<text x="{x:.1f}" y="{height - 36}" text-anchor="middle" '
+                'font-family="Arial" font-size="10" fill="#475569">'
+                f'{escape(check_date.isoformat())}</text>'
+            )
+    for dag_id, color in colors.items():
+        points = [
+            (index, rates[(check_date, dag_id)])
+            for index, check_date in enumerate(dates)
+            if (check_date, dag_id) in rates
+        ]
+        if points:
+            polyline = " ".join(
+                f"{x_position(index):.1f},{y_position(rate):.1f}"
+                for index, rate in points
+            )
+            svg.append(
+                f'<polyline points="{polyline}" fill="none" stroke="{color}" '
+                'stroke-width="3"/>'
+            )
+            for index, rate in points:
+                svg.append(
+                    f'<circle cx="{x_position(index):.1f}" '
+                    f'cy="{y_position(rate):.1f}" r="4" fill="{color}"/>'
+                )
+    for index, (dag_id, color) in enumerate(colors.items()):
+        x = margin["left"] + index * 245
+        svg.append(
+            f'<line x1="{x}" y1="{height - 12}" x2="{x + 22}" '
+            f'y2="{height - 12}" stroke="{color}" stroke-width="3"/>'
+        )
+        svg.append(
+            f'<text x="{x + 28}" y="{height - 8}" font-family="Arial" '
+            f'font-size="12">{escape(dag_id)}</text>'
+        )
+    if not trend_rows:
+        svg.append(
+            '<text x="450" y="220" text-anchor="middle" font-family="Arial" '
+            'font-size="16" fill="#64748b">No dq_results rows in the last 30 days</text>'
+        )
+    svg.append("</svg>")
+    output_path = output_path or REPORT_DIR / "dq_trend.svg"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(svg), encoding="utf-8")
+    return output_path
 
 
 def write_quarantine_csv(df: pd.DataFrame, file_name: str, run_id: str, dag_id: str = "nammamart") -> str:
