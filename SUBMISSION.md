@@ -1,6 +1,6 @@
 # NammaMart ETL and ELT assignment
 
-I built both pipelines and checked their transformations locally. The Airflow DAGs parse, but I could not complete a green Airflow run in this environment: the DAG test was killed with exit code 137, ELT's latest scheduled run failed, and ETL still has queued/scheduled tasks. I have not made screenshots or claimed results from Airflow experiments I did not run.
+I built both pipelines and checked their transformations locally. The Airflow DAGs parse, but I could not complete a green Airflow run in this environment: the DAG test was killed with exit code 137, ELT's latest scheduled run failed, and ETL still has queued/scheduled tasks. I captured the current Airflow states and local results in `screenshots/`; none of the DAG screenshots are green-run evidence.
 
 ## Part 0: Data issues log
 
@@ -216,6 +216,23 @@ ELT's reason-based quarantine total includes duplicate source rows after weighti
 
 The DAGs parse without import errors. I ran experiments 7 and 8 through the local ETL validator on disposable copies, but have not verified either through Airflow or ELT. Freshness has an explicit DQ check, and the MRP comparison provides a basic distribution warning. Exact mart-to-source lineage is still incomplete, and schema failures rely on expected-column access. The Airflow experiments, including successful runs and recovery, still need to be completed.
 
+### Screenshot evidence
+
+The screenshots are in [`screenshots/`](./screenshots/). They show what I actually observed:
+
+| Screenshot | What it shows |
+| --- | --- |
+| [`etl-dag-run-current-status.png`](./screenshots/etl-dag-run-current-status.png) | ETL Graph view; tasks are queued or scheduled, not green |
+| [`elt-dag-failed-run.png`](./screenshots/elt-dag-failed-run.png) | ELT Graph view; the scheduled run failed |
+| [`schedule-9am-ist.png`](./screenshots/schedule-9am-ist.png) | Airflow schedule cron, `0 9 * * 1-6` |
+| [`scheduled-run-time.png`](./screenshots/scheduled-run-time.png) | Failed scheduled run; Airflow displays its logical date as 09:00 |
+| [`quarantine-sample.png`](./screenshots/quarantine-sample.png) | Sample rows and failure reasons from the local quarantine file; customer IDs are omitted |
+| [`dq-results-etl.png`](./screenshots/dq-results-etl.png) and [`dq-results-elt.png`](./screenshots/dq-results-elt.png) | Local `dq_results` summaries by dimension |
+| [`pipeline-runs.png`](./screenshots/pipeline-runs.png) | Local DuckDB run-audit rows; not Airflow DAG run records |
+| [`payment-reconciliation.png`](./screenshots/payment-reconciliation.png) | Local ETL and ELT reconciliation counts and amount differences |
+
+The assignment's green Graph screenshots are still outstanding because neither DAG has a successful Airflow run yet.
+
 ## Part G: Recommendation
 
 **To: Sameer, CTO**
@@ -230,4 +247,4 @@ The main risks are:
 2. Airflow scheduling, retries, recovery, and alerts have not been demonstrated by a green Airflow run.
 3. Raw customer data requires strict access and retention controls, and mart-to-source lineage needs a durable row-level link.
 
-Submission note: I pushed this work to my [personal fork](https://github.com/dvpbandaru/IIT_Roorkie_CEC_Futurenece_Data_Pipeline_to_ML_Model). Airflow screenshots remain pending a successful UI run.
+Submission note: I pushed this work to my [personal fork](https://github.com/dvpbandaru/IIT_Roorkie_CEC_Futurenece_Data_Pipeline_to_ML_Model). The current screenshots are committed, but green Airflow Graph screenshots remain pending a successful run.
