@@ -230,4 +230,4 @@ The main risks are:
 2. Airflow scheduling, retries, recovery, and alerts have not been demonstrated by a green Airflow run.
 3. Raw customer data requires strict access and retention controls, and mart-to-source lineage needs a durable row-level link.
 
-Submission note: the configured Git remote is the course repository, not a personal fork, so I have not pushed these changes there. Airflow screenshots remain pending a successful UI run.
+Submission note: I pushed this work to my [personal fork](https://github.com/dvpbandaru/IIT_Roorkie_CEC_Futurenece_Data_Pipeline_to_ML_Model). Airflow screenshots remain pending a successful UI run.
